@@ -6,6 +6,7 @@ import subprocess
 import time
 import os
 import re
+import sys
 
 tk = Tk()
 tk.title("Video Stabilization GUI")
@@ -116,6 +117,16 @@ class GuiRadio(GuiThing):
 
 
 """
+free text, for ffmpeg command such as hwaccel for encoding
+"""
+class GuiTextInput(GuiThing):
+    def __init__(self, name, description, tab, default=""):
+        super().__init__(name, description, tab)
+        self.valueHolder = Entry(self.frame, width=100)
+        self.valueHolder.pack(anchor=NW)
+        self.valueHolder.insert(0, default)
+
+"""
 A function that calls ffmpeg with the selected settings
 """
 def stabilize():
@@ -140,6 +151,17 @@ def stabilize():
         Messagebox.showerror(title="Error", message="Can't find ffmpeg. Please download the build from https://ffmpeg.org/download.html and place it next to the vidstabgui")
         return
 
+    # set GPU accel for decode
+    print(hwaccel.getValue())
+    if hwaccel.getValue() == "0":
+        if sys.platform == 'linux':
+            hwaccel_cmd = '-hwaccel vaapi'
+        elif sys.platform == 'win32':
+            hwaccel_cmd = '-hwaccel auto'
+    else:
+        hwaccel_cmd = ''
+
+        
     for file in files.files:
         # Generate output filename. ( inputfilename.stabilized.time.mp4 )
         output = ".".join( file.split(".")[0:-1] + ["stabilized",str(int(time.time())), "mp4"] )
@@ -154,16 +176,9 @@ def stabilize():
         # Analyze motion - only if transform file not generated yet
         slug = re.sub(r'[\W_]+', '-', file)
         transformfile = slug + str(shakiness.getValue()) + ".trf"
-        
-        hwaccel = ''
-        if hwaccel.getArgument() == 1:
-            if sys.platform == 'linux':
-                hwaccel = '-hwaccel vaapi'
-            elif sys.platform == 'win32':
-                hwaccel = '-hwaccel dxva2'
-                
+
         if not os.path.isfile( transformfile ):
-            command  = f"{ffmpeg} {hwaccel} -i \"{file}\""
+            command  = f"{ffmpeg} {hwaccel_cmd} -i \"{file}\""
             command += f" -vf vidstabdetect={shakiness.getArgument()}:result={transformfile}"
             command += f" -f null -"
             print(command)
@@ -177,10 +192,11 @@ def stabilize():
         filelist.selection_set(index)
         tk.update()
 
+
         # Stabilize video
-        command  = f"{ffmpeg} {hwaccel} -i \"{file}\""
-        command += f" -crf {crf.getValue()}"
-        command += f" -preset {preset.getValue()}"
+        command  = f"{ffmpeg} {hwaccel_cmd} -i \"{file}\""
+        #command += f" -crf {crf.getValue()}"
+        #command += f" -preset {preset.getValue()}"
         command += f" -threads {limitcpu.getValue()}"
         if speedup.getValue() > 1:
             fps = min(30*speedup.getValue(), 120) # clamp fps 0-120
@@ -201,6 +217,13 @@ def stabilize():
         command += f":{maxshift.getArgument()}"
         command += f":maxangle={-1 if maxangle.getValue() < 0 else maxangle.getValue()*3.1415/180}"
         command += f":input='{transformfile}'"
+        if freetext.getValue().strip():
+            print("User has entered custom command:", freetext.getValue())
+            command += f" {freetext.getValue()}"
+        else:
+            command += f" -crf {crf.getValue()}"
+            command += f" -preset {preset.getValue()}"
+
         command += f" \"{output}\" -y"
         print(command)
         subprocess.call(command, shell=bool(showconsole.get()) )
@@ -256,8 +279,8 @@ sharpening = GuiSlider("sharpening", "A little bit of sharpening is recommended 
 crf        = GuiSlider("crf", "Output video compression rate factor. Smaller crf: Better quality, greater file size. Bigger crf: Better compression, smaller file size.", mp4settings, 0, 51, 21)
 speedup    = GuiSlider("speed up", "Speed up video for hyperlapse effect. Use more smoothing for better stabilization.", mp4settings, 1, 20, 1, 1)
 
-hwaccel    = GuiRadio("hwaccel", "Use GPU acceleration. ", mp4settings, [ ["0","Disabled"],["1","Enable"] ])
-
+hwaccel    = GuiRadio("hwaccel", "Use GPU acceleration. ", mp4settings, [ ["0","Enabled"],["1","Disable"] ])
+freetext   = GuiTextInput("freetext", "ffmpeg custom command for encoding. crf and preset will igonre if custom command exist. ", mp4settings, "-c:v hevc_amf -profile:v main -quality quality -preset quality -rc hqcbr -b:v 200M -c:a copy")
 
 # A frame that holds the Stabilize button
 stabilizeFrame = LabelFrame(output, text="Stabilize", padx=0, pady=0)
