@@ -22,7 +22,8 @@ setup(
 			                'tkinter',
 			                'subprocess',
 			                'time',
-			                'os'
+			                'os',
+					'sys'
 			                ]
                 }
         }
