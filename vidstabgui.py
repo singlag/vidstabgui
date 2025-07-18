@@ -155,8 +155,15 @@ def stabilize():
         slug = re.sub(r'[\W_]+', '-', file)
         transformfile = slug + str(shakiness.getValue()) + ".trf"
         
+        hwaccel = ''
+        if hwaccel.getArgument() == 1:
+            if sys.platform == 'linux':
+                hwaccel = '-hwaccel vaapi'
+            elif sys.platform == 'win32':
+                hwaccel = '-hwaccel dxva2'
+                
         if not os.path.isfile( transformfile ):
-            command  = f"{ffmpeg} -i \"{file}\""
+            command  = f"{ffmpeg} {hwaccel} -i \"{file}\""
             command += f" -vf vidstabdetect={shakiness.getArgument()}:result={transformfile}"
             command += f" -f null -"
             print(command)
@@ -171,7 +178,7 @@ def stabilize():
         tk.update()
 
         # Stabilize video
-        command  = f"{ffmpeg} -i \"{file}\""
+        command  = f"{ffmpeg} {hwaccel} -i \"{file}\""
         command += f" -crf {crf.getValue()}"
         command += f" -preset {preset.getValue()}"
         command += f" -threads {limitcpu.getValue()}"
@@ -248,6 +255,9 @@ limitcpu   = GuiSlider("limit cpu", "Limit CPU cores when encoding. (0 = no limi
 sharpening = GuiSlider("sharpening", "A little bit of sharpening is recommended after stabilization.", mp4settings, 0, 1.5, 0.8, 0.05)
 crf        = GuiSlider("crf", "Output video compression rate factor. Smaller crf: Better quality, greater file size. Bigger crf: Better compression, smaller file size.", mp4settings, 0, 51, 21)
 speedup    = GuiSlider("speed up", "Speed up video for hyperlapse effect. Use more smoothing for better stabilization.", mp4settings, 1, 20, 1, 1)
+
+hwaccel    = GuiRadio("hwaccel", "Use GPU acceleration. ", mp4settings, [ ["0","Disabled"],["1","Enable"] ])
+
 
 # A frame that holds the Stabilize button
 stabilizeFrame = LabelFrame(output, text="Stabilize", padx=0, pady=0)
