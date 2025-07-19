@@ -9,7 +9,7 @@ import re
 import sys
 
 tk = Tk()
-tk.title("Video Stabilization GUI")
+tk.title("Video Stabilization GUI for FFMpeg")
 
 """
 Base class for every GUI element.
@@ -126,6 +126,45 @@ class GuiTextInput(GuiThing):
         self.valueHolder.pack(anchor=NW)
         self.valueHolder.insert(0, default)
 
+
+"""
+A function that deletes all .trf files after user confirmation
+"""
+def housekeep():
+    # Change working directory to script directory on POSIX systems
+    if os.name == "posix":
+        abspath = os.path.abspath(__file__)
+        dirname = os.path.dirname(abspath)
+        os.chdir(dirname)
+        print("Working directory:", os.getcwd())
+    
+    # Find all .trf files in the current directory
+    trf_files = [file for file in os.listdir(".") if file.endswith(".trf")]
+    
+    # If no .trf files are found, show a message and return
+    if not trf_files:
+        Messagebox.showinfo(title="Housekeeping", message="No .trf files found to delete.")
+        return
+    
+    # Create a message listing the files to be deleted
+    file_list = "\n".join(trf_files)
+    confirm_message = f"The following .trf files will be deleted:\n\n{file_list}\n\nProceed with deletion?"
+    
+    # Show confirmation dialog
+    if not Messagebox.askyesno(title="Confirm Deletion", message=confirm_message):
+        print("Housekeeping cancelled by user.")
+        return
+    
+    # Delete the .trf files
+    try:
+        for file in trf_files:
+            os.remove(file)
+            print(f"Deleted: {file}")
+        Messagebox.showinfo(title="Housekeeping", message="All .trf files have been successfully deleted.")
+        print("Housekeeping completed: All .trf files removed.")
+    except Exception as e:
+        Messagebox.showerror(title="Error", message=f"Failed to delete .trf files: {str(e)}")
+        
 """
 A function that calls ffmpeg with the selected settings
 """
@@ -175,11 +214,17 @@ def stabilize():
         
         # Analyze motion - only if transform file not generated yet
         slug = re.sub(r'[\W_]+', '-', file)
-        transformfile = slug + str(shakiness.getValue()) + ".trf"
+        transformfile = slug + str(shakiness.getValue()) + str(tripod.getValue()) + ".trf"
 
         if not os.path.isfile( transformfile ):
             command  = f"{ffmpeg} {hwaccel_cmd} -i \"{file}\""
-            command += f" -vf vidstabdetect={shakiness.getArgument()}:result={transformfile}"
+
+            print (tripod.getValue())
+            if tripod.getValue() == "0":
+                command += f" -vf vidstabdetect={shakiness.getArgument()}:result={transformfile}"
+            else:
+                command += f" -vf vidstabdetect={shakiness.getArgument()}:{tripod.getArgument()}:result={transformfile}"
+                
             command += f" -f null -"
             print(command)
             subprocess.call(command, shell=bool(showconsole.get()) )
@@ -216,6 +261,11 @@ def stabilize():
         command += f":{interpol.getArgument()}"
         command += f":{maxshift.getArgument()}"
         command += f":maxangle={-1 if maxangle.getValue() < 0 else maxangle.getValue()*3.1415/180}"
+
+        print (tripod.getValue())
+        if tripod.getValue() != "0":
+            command += f":tripod=1"
+            
         command += f":input='{transformfile}'"
         if freetext.getValue().strip():
             print("User has entered custom command:", freetext.getValue())
@@ -237,8 +287,10 @@ def stabilize():
     # Open output folder in the file manager
     outputfolder = "/".join( file.split("/")[0:-1] )
     print("Output folder:", outputfolder)
-    subprocess.call(f"start \"\" \"{outputfolder}\" ", shell=True) # Windows
-    subprocess.call(f"open \"{outputfolder}\" ", shell=True)       # OSX
+    if sys.platform == 'win32':
+        subprocess.call(f"start \"\" \"{outputfolder}\" ", shell=True) # Windows
+    else:
+        subprocess.call(f"open \"{outputfolder}\" ", shell=True)       # OSX
 
 
 #########################################################################
@@ -262,11 +314,12 @@ tabs.pack(expand = 1, fill ="both")
 files      = GuiFiles("input files", "Open mp4, mov, avi... videos here", inputfiles)
 
 shakiness  = GuiSlider("shakiness", "On a scale of 1 to 10 how quick is the camera shake in your opinion?", stabsettings, 1, 10, 6)
-smoothing  = GuiSlider("smoothing", "Number of frames used in stabilization process. Bigger frame count = smoother motion. (A number of 10 means that 21 frames are used: 10 in the past and 10 in the future.) ", stabsettings, 1, 1000, 60,5)
+smoothing  = GuiSlider("smoothing", "Number of frames used in stabilization process. Bigger frame count = smoother motion. (A number of 10 means that 21 frames are used: 10 in the past and 10 in the future.) ", stabsettings, 0, 1000, 10,10)
 optalgo    = GuiRadio("optalgo", "Set the camera path optimization algorithm.", stabsettings, [ ["gauss","Gaussian kernel low-pass filter on camera motion"],["avg"," Averaging on transformations"] ])
 interpol   = GuiRadio("interpol", "Specify type of interpolation", stabsettings, [ ["bilinear","Linear in both directions"],["bicubic","Cubic in both directions - slow"],["linear","Linear only horizontal"],["no","No interpolation"] ])
 maxshift   = GuiSlider("maxshift", "Set maximal number of pixels to translate frames. (-1 = no limit)", stabsettings, -1, 640, -1)
 maxangle   = GuiSlider("maxangle", "Set maximal angle in degrees to rotate frames. (-1 = no limit)", stabsettings, -1, 360, -1)
+tripod     = GuiTextInput("tripod", "Set reference frame number for tripod mode. (0 = disable)", stabsettings, "0")
 
 optzoom    = GuiRadio("optzoom", "Set optimal zooming to avoid blank-borders. ", zoomsettings, [ ["0","Disabled"],["1","Optimal static zoom value is determined"], ["2", "Optimal adaptive zoom value is determined"] ])
 zoom       = GuiSlider("zoom", "Zoom in or out (percentage).", zoomsettings, -100, 100, 0)
@@ -279,8 +332,8 @@ sharpening = GuiSlider("sharpening", "A little bit of sharpening is recommended 
 crf        = GuiSlider("crf", "Output video compression rate factor. Smaller crf: Better quality, greater file size. Bigger crf: Better compression, smaller file size.", mp4settings, 0, 51, 21)
 speedup    = GuiSlider("speed up", "Speed up video for hyperlapse effect. Use more smoothing for better stabilization.", mp4settings, 1, 20, 1, 1)
 
-hwaccel    = GuiRadio("hwaccel", "Use GPU acceleration. ", mp4settings, [ ["0","Enabled"],["1","Disable"] ])
-freetext   = GuiTextInput("freetext", "ffmpeg custom command for encoding. crf and preset will igonre if custom command exist. ", mp4settings, "-c:v hevc_amf -profile:v main -quality quality -preset quality -rc hqcbr -b:v 200M -c:a copy")
+hwaccel    = GuiRadio("hwaccel", "Use GPU acceleration decode. ", mp4settings, [ ["0","Enabled"],["1","Disable"] ])
+freetext   = GuiTextInput("freetext", "ffmpeg custom command for encode. crf and preset will igonre if custom command exist. ", mp4settings, "-c:v hevc_amf -profile:v main -quality quality -preset quality -rc hqvbr -b:v 200M -c:a copy")
 
 # A frame that holds the Stabilize button
 stabilizeFrame = LabelFrame(output, text="Stabilize", padx=0, pady=0)
@@ -289,8 +342,11 @@ stabilizeFrame.pack(anchor=NW, fill='x')
 filelist = Listbox(stabilizeFrame, width=80, height=25)
 filelist.pack(anchor=NW, expand = 1, fill ="both")
 
-stabilizeButton = Button(stabilizeFrame, text="Stabilize", padx=20, pady=10, bg="white", command=stabilize )
+stabilizeButton = Button(stabilizeFrame, text="Stabilize", padx=200, pady=20, bg="white", command=stabilize )
 stabilizeButton.pack(pady=10)
+
+housekeepButton = Button(stabilizeFrame, text="Housekeep trf files", padx=172, pady=10, bg="white", command=housekeep )
+housekeepButton.pack(pady=10)
 
 showconsole = IntVar()
 showconsole.set(1)
